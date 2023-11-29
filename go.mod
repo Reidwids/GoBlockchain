@@ -1,3 +1,3 @@
-module CryptoResearch/GoBlockchain
+module GoBlockchain
 
 go 1.19
