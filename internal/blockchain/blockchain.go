@@ -5,8 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
 	"time"
+
+	"GoBlockchain/internal/blockchain/pb"
+
+	"google.golang.org/protobuf/proto"
 )
 
 type Transaction struct {
@@ -46,24 +52,24 @@ func NewBlockchain() *Blockchain {
 	}
 }
 
-func createBlock(Blockchain *Blockchain, proof int64, previousHash []byte) *Block {
+func createBlock(blockchain *Blockchain, proof int64, previousHash []byte) *Block {
 	newBlock := &Block{
-		index:        int64(len(Blockchain.chain)),
+		index:        int64(len(blockchain.chain)),
 		timestamp:    time.Now().Unix(),
 		proof:        proof,
 		prevHash:     previousHash,
-		transactions: Blockchain.transactions,
+		transactions: blockchain.transactions,
 	}
-	Blockchain.chain = append(Blockchain.chain, newBlock)
-	Blockchain.transactions = []*Transaction{}
+	blockchain.chain = append(blockchain.chain, newBlock)
+	blockchain.transactions = []*Transaction{}
 	return newBlock
 }
 
-func getPreviousBlock(Blockchain *Blockchain) *Block {
-	return Blockchain.chain[len(Blockchain.chain)-1]
+func getPreviousBlock(blockchain *Blockchain) *Block {
+	return blockchain.chain[len(blockchain.chain)-1]
 }
 
-func proofOfWork(Blockchain *Blockchain, previousProof int64) int64 {
+func proofOfWork(previousProof int64) int64 {
 	newProof := int64(1)
 	checkProof := false
 
@@ -79,7 +85,7 @@ func proofOfWork(Blockchain *Blockchain, previousProof int64) int64 {
 	return newProof
 }
 
-func hashBlock(Blockchain *Blockchain, Block *Block) []byte {
+func hashBlock(Block *Block) []byte {
 	encodedBlock := sha256.Sum256([]byte(fmt.Sprintf("%v", Block)))
 	return []byte(hex.EncodeToString(encodedBlock[:]))
 }
@@ -92,12 +98,12 @@ func hashProof(newProof int64, prevProof int64) string {
 	return hex.EncodeToString(hashBytes[:])
 }
 
-func isChainValid(Blockchain *Blockchain, chain []*Block) bool {
+func isChainValid(blockchain *Blockchain, chain []*Block) bool {
 	for i, block := range chain {
 		if i > 0 {
 			prevBlock := chain[i-1]
 			// False if the previous block hash does not equal the current block hash
-			if !bytes.Equal(block.prevHash, hashBlock(Blockchain, prevBlock)) {
+			if !bytes.Equal(block.prevHash, hashBlock(prevBlock)) {
 				return false
 			}
 
@@ -111,25 +117,25 @@ func isChainValid(Blockchain *Blockchain, chain []*Block) bool {
 	return true
 }
 
-func addTransaction(Blockchain *Blockchain, sender string, recipient string, amount float64) {
+func addTransaction(blockchain *Blockchain, sender string, recipient string, amount float64) {
 	newTx := &Transaction{
 		sender:    sender,
 		recipient: recipient,
 		amount:    amount,
 	}
-	Blockchain.transactions = append(Blockchain.transactions, newTx)
+	blockchain.transactions = append(blockchain.transactions, newTx)
 	print("Transaction successfully added!")
 }
 
-func addNode(Blockchain *Blockchain, address string) {
-	Blockchain.nodes = append(Blockchain.nodes, address)
+func addNode(blockchain *Blockchain, address string) {
+	blockchain.nodes = append(blockchain.nodes, address)
 	print("Node successfully added!")
 }
 
-func replaceChain(Blockchain *Blockchain) bool {
-	longestChain := nil
-	maxlength := len(Blockchain.chain)
-	for node := range Blockchain.nodes {
+func replaceChain(blockchain *Blockchain) bool {
+	// longestChain := nil
+	// maxlength := len(Blockchain.chain)
+	for node := range blockchain.nodes {
 		url := fmt.Sprintf("http://%s/getChain", node)
 		response, err := http.Get(url)
 		if err != nil {
@@ -137,12 +143,40 @@ func replaceChain(Blockchain *Blockchain) bool {
 			return false
 		}
 		defer response.Body.Close()
-		body, err := ioutil.ReadAll(response.Body)
+
+		// Read the response body
+		body, err := io.ReadAll(response.Body)
 		if err != nil {
 			fmt.Println("Error reading response body:", err)
-			return
+			return false
+		}
+		// Decode the protobuf-encoded data
+		var receivedChain pb.Chain
+		err = proto.Unmarshal(body, &receivedChain)
+		if err != nil {
+			fmt.Println("Error decoding protobuf data:", err)
+			return false
 		}
 
-		// res :=
+		// Access the received blockchain's chain
+		for _, block := range receivedChain.Chain {
+			fmt.Printf("Block %d\n", block.Index)
+			for _, tx := range block.Transactions {
+				fmt.Printf("  Transaction ID: %x\n", tx.ID)
+				fmt.Printf("  Sender: %s\n", tx.Sender)
+				fmt.Printf("  Recipient: %s\n", tx.Recipient)
+				fmt.Printf("  Amount: %f\n", tx.Amount)
+			}
+		}
 	}
+	return true
 }
+
+// Improvements:
+// 1. add fork resolution & detection
+// 2. add consensus algorithm
+// 3. add transaction propagation
+// 5. add mining rewards
+// 4. add wallet functionality
+// 6. add transaction fees
+// 7. add wallets and wallet balances
