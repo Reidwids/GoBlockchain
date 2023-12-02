@@ -5,68 +5,44 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"math"
-	"net/http"
 	"time"
 
+	"GoBlockchain/internal/api"
 	"GoBlockchain/internal/blockchain/pb"
-
-	"google.golang.org/protobuf/proto"
 )
 
-type Transaction struct {
-	ID        []byte
-	sender    string
-	recipient string
-	amount    float64
-}
-
-type Block struct {
-	index        int64
-	timestamp    int64
-	proof        int64
-	prevHash     []byte
-	transactions []*Transaction
-}
-
-type Blockchain struct {
-	chain        []*Block
-	transactions []*Transaction
-	nodes        []string
-}
-
-func NewBlockchain() *Blockchain {
-	genesisBlock := &Block{
-		index:        0,
-		timestamp:    time.Now().Unix(),
-		proof:        0,
-		prevHash:     []byte{},
-		transactions: []*Transaction{},
+func NewBlockchain() *pb.Blockchain {
+	genesisBlock := &pb.Block{
+		Index:        0,
+		Timestamp:    time.Now().Unix(),
+		Proof:        0,
+		PrevHash:     []byte{},
+		Transactions: []*pb.Transaction{},
 	}
 
-	return &Blockchain{
-		chain:        []*Block{genesisBlock},
-		transactions: []*Transaction{},
-		nodes:        []string{},
+	return &pb.Blockchain{
+		Chain:        []*pb.Block{genesisBlock},
+		Transactions: []*pb.Transaction{},
+		Nodes:        []string{},
 	}
 }
 
-func createBlock(blockchain *Blockchain, proof int64, previousHash []byte) *Block {
-	newBlock := &Block{
-		index:        int64(len(blockchain.chain)),
-		timestamp:    time.Now().Unix(),
-		proof:        proof,
-		prevHash:     previousHash,
-		transactions: blockchain.transactions,
+func createBlock(blockchain *pb.Blockchain, proof int64, previousHash []byte) *pb.Block {
+	newBlock := &pb.Block{
+		Index:        int64(len(blockchain.Chain)),
+		Timestamp:    time.Now().Unix(),
+		Proof:        proof,
+		PrevHash:     previousHash,
+		Transactions: blockchain.Transactions,
 	}
-	blockchain.chain = append(blockchain.chain, newBlock)
-	blockchain.transactions = []*Transaction{}
+	blockchain.Chain = append(blockchain.Chain, newBlock)
+	blockchain.Transactions = []*pb.Transaction{}
 	return newBlock
 }
 
-func getPreviousBlock(blockchain *Blockchain) *Block {
-	return blockchain.chain[len(blockchain.chain)-1]
+func getPreviousBlock(blockchain *pb.Blockchain) *pb.Block {
+	return blockchain.Chain[len(blockchain.Chain)-1]
 }
 
 func proofOfWork(previousProof int64) int64 {
@@ -85,7 +61,7 @@ func proofOfWork(previousProof int64) int64 {
 	return newProof
 }
 
-func hashBlock(Block *Block) []byte {
+func hashBlock(Block *pb.Block) []byte {
 	encodedBlock := sha256.Sum256([]byte(fmt.Sprintf("%v", Block)))
 	return []byte(hex.EncodeToString(encodedBlock[:]))
 }
@@ -98,17 +74,17 @@ func hashProof(newProof int64, prevProof int64) string {
 	return hex.EncodeToString(hashBytes[:])
 }
 
-func isChainValid(blockchain *Blockchain, chain []*Block) bool {
+func isChainValid(chain []*pb.Block) bool {
 	for i, block := range chain {
 		if i > 0 {
 			prevBlock := chain[i-1]
 			// False if the previous block hash does not equal the current block hash
-			if !bytes.Equal(block.prevHash, hashBlock(prevBlock)) {
+			if !bytes.Equal(block.PrevHash, hashBlock(prevBlock)) {
 				return false
 			}
 
 			// False if the proof does not start with 0000
-			proofHash := hashProof(block.proof, prevBlock.proof)
+			proofHash := hashProof(block.Proof, prevBlock.Proof)
 			if proofHash[:4] != "0000" {
 				return false
 			}
@@ -117,59 +93,41 @@ func isChainValid(blockchain *Blockchain, chain []*Block) bool {
 	return true
 }
 
-func addTransaction(blockchain *Blockchain, sender string, recipient string, amount float64) {
-	newTx := &Transaction{
-		sender:    sender,
-		recipient: recipient,
-		amount:    amount,
+func addTransaction(blockchain *pb.Blockchain, sender string, recipient string, amount float32) {
+	newTx := &pb.Transaction{
+		Sender:    sender,
+		Recipient: recipient,
+		Amount:    amount,
 	}
-	blockchain.transactions = append(blockchain.transactions, newTx)
+	blockchain.Transactions = append(blockchain.Transactions, newTx)
 	print("Transaction successfully added!")
 }
 
-func addNode(blockchain *Blockchain, address string) {
-	blockchain.nodes = append(blockchain.nodes, address)
+func addNode(blockchain *pb.Blockchain, address string) {
+	blockchain.Nodes = append(blockchain.Nodes, address)
 	print("Node successfully added!")
 }
 
-func replaceChain(blockchain *Blockchain) bool {
-	// longestChain := nil
-	// maxlength := len(Blockchain.chain)
-	for node := range blockchain.nodes {
-		url := fmt.Sprintf("http://%s/getChain", node)
-		response, err := http.Get(url)
-		if err != nil {
-			fmt.Println("Error Connecting with node %s:", node, err)
-			return false
-		}
-		defer response.Body.Close()
+func replaceChain(blockchain *pb.Blockchain) error {
+	var longestChain []*pb.Block
+	maxlength := len(blockchain.Chain)
+	for _, node := range blockchain.Nodes {
+		nodeChain, err := api.GetChainFromNode(node)
 
-		// Read the response body
-		body, err := io.ReadAll(response.Body)
 		if err != nil {
-			fmt.Println("Error reading response body:", err)
-			return false
+			return err
 		}
-		// Decode the protobuf-encoded data
-		var receivedChain pb.Chain
-		err = proto.Unmarshal(body, &receivedChain)
-		if err != nil {
-			fmt.Println("Error decoding protobuf data:", err)
-			return false
-		}
-
 		// Access the received blockchain's chain
-		for _, block := range receivedChain.Chain {
-			fmt.Printf("Block %d\n", block.Index)
-			for _, tx := range block.Transactions {
-				fmt.Printf("  Transaction ID: %x\n", tx.ID)
-				fmt.Printf("  Sender: %s\n", tx.Sender)
-				fmt.Printf("  Recipient: %s\n", tx.Recipient)
-				fmt.Printf("  Amount: %f\n", tx.Amount)
-			}
+		if len(nodeChain) > maxlength && isChainValid(nodeChain) {
+			maxlength = len(nodeChain)
+			longestChain = nodeChain
 		}
 	}
-	return true
+	if longestChain != nil {
+		blockchain.Chain = longestChain
+	}
+
+	return nil
 }
 
 // Improvements:
