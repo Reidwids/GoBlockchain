@@ -9,6 +9,7 @@ import (
 
 func main() {
 	// Define command-line flags
+
 	createBlockchain := flag.Bool("create", false, "Create a new blockchain")
 	addBlock := flag.String("addblock", "", "Add a new block to the blockchain")
 	listBlocks := flag.Bool("list", false, "List all blocks in the blockchain")

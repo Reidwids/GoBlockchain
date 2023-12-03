@@ -5,11 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
 	"time"
 
-	"GoBlockchain/internal/api"
 	"GoBlockchain/internal/blockchain/pb"
+
+	"google.golang.org/protobuf/proto"
 )
 
 func NewBlockchain() *pb.Blockchain {
@@ -112,7 +115,7 @@ func replaceChain(blockchain *pb.Blockchain) error {
 	var longestChain []*pb.Block
 	maxlength := len(blockchain.Chain)
 	for _, node := range blockchain.Nodes {
-		nodeChain, err := api.GetChainFromNode(node)
+		nodeChain, err := getChainFromNode(node)
 
 		if err != nil {
 			return err
@@ -128,6 +131,34 @@ func replaceChain(blockchain *pb.Blockchain) error {
 	}
 
 	return nil
+}
+
+func getChainFromNode(node string) ([]*pb.Block, error) {
+	url := fmt.Sprintf("http://%s/getChain", node)
+	response, err := http.Get(url)
+	if err != nil {
+		fmt.Println("Error Connecting with node:", node, err)
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	// Read the response body
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		fmt.Println("Error reading response body:", err)
+		return nil, err
+	}
+	// Decode the protobuf-encoded data
+	var chainBuf pb.Chain
+	err = proto.Unmarshal(body, &chainBuf)
+	if err != nil {
+		fmt.Println("Error decoding protobuf data:", err)
+		return nil, err
+	}
+
+	receivedChain := chainBuf.Chain
+
+	return receivedChain, nil
 }
 
 // Improvements:

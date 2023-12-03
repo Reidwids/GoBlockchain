@@ -1,20 +1,34 @@
 package api
 
 import (
+	"GoBlockchain/internal/blockchain"
 	"GoBlockchain/internal/blockchain/pb"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-
-	"google.golang.org/protobuf/proto"
 )
 
 func Start() {
 	fmt.Println("Starting Go Blockchain...")
+	bc := blockchain.NewBlockchain()
+
 	http.HandleFunc("/", handleRoot)
-	// http.HandleFunc("/download", handleDownload)
+	http.HandleFunc("/mineBlock", withBlockchain(handleMineBlock, bc))
+	// http.HandleFunc("/getChain", handleGetChain)
+	// http.HandleFunc("/isChainValid", handleIsChainValid)
+	// http.HandleFunc("/addTransaction", handleAddTransaction)
+	// http.HandleFunc("/connectNode", handleConnectNode)
+	// http.HandleFunc("/replaceChain", handleReplaceChain)
 	http.ListenAndServe(":3003", nil)
+}
+
+func withBlockchain(next http.HandlerFunc, bc *pb.Blockchain) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Add 'bc' to the request context
+		ctx := context.WithValue(r.Context(), "blockchain", bc)
+		next(w, r.WithContext(ctx))
+	}
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -29,30 +43,7 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func GetChainFromNode(node string) ([]*pb.Block, error) {
-	url := fmt.Sprintf("http://%s/getChain", node)
-	response, err := http.Get(url)
-	if err != nil {
-		fmt.Println("Error Connecting with node:", node, err)
-		return nil, err
-	}
-	defer response.Body.Close()
-
-	// Read the response body
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		fmt.Println("Error reading response body:", err)
-		return nil, err
-	}
-	// Decode the protobuf-encoded data
-	var chainBuf pb.Chain
-	err = proto.Unmarshal(body, &chainBuf)
-	if err != nil {
-		fmt.Println("Error decoding protobuf data:", err)
-		return nil, err
-	}
-
-	receivedChain := chainBuf.Chain
-
-	return receivedChain, nil
+func handleMineBlock(w http.ResponseWriter, r *http.Request) {
+	// bc := r.Context().Value("blockchain").(*pb.Blockchain)
+	// previousBlock :=
 }
