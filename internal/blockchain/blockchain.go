@@ -5,34 +5,45 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"time"
 
-	"GoBlockchain/internal/blockchain/pb"
-
-	"google.golang.org/protobuf/proto"
+	"GoBlockchain/internal/transactions"
 )
 
-func NewBlockchain() *pb.Blockchain {
-	genesisBlock := &pb.Block{
+type Blockchain struct {
+	Chain        []*Block
+	Transactions []*transactions.Transaction
+	Nodes        []string
+}
+
+type Block struct {
+	Index        int64
+	Timestamp    int64
+	Proof        int64
+	PrevHash     []byte
+	Transactions []*transactions.Transaction
+}
+
+func NewBlockchain() *Blockchain {
+	genesisBlock := &Block{
 		Index:        0,
 		Timestamp:    time.Now().Unix(),
 		Proof:        0,
 		PrevHash:     []byte{},
-		Transactions: []*pb.Transaction{},
+		Transactions: []*transactions.Transaction{},
 	}
 
-	return &pb.Blockchain{
-		Chain:        []*pb.Block{genesisBlock},
-		Transactions: []*pb.Transaction{},
-		Nodes:        []string{},
+	return &Blockchain{
+		Chain:        []*Block{genesisBlock},
+		Transactions: []*transactions.Transaction{},
+		Nodes:        []string{"localhost:3001", "localhost:3002"},
 	}
 }
 
-func CreateBlock(blockchain *pb.Blockchain, proof int64, previousHash []byte) *pb.Block {
-	newBlock := &pb.Block{
+func CreateBlock(blockchain *Blockchain, proof int64, previousHash []byte) *Block {
+	newBlock := &Block{
 		Index:        int64(len(blockchain.Chain)),
 		Timestamp:    time.Now().Unix(),
 		Proof:        proof,
@@ -40,11 +51,11 @@ func CreateBlock(blockchain *pb.Blockchain, proof int64, previousHash []byte) *p
 		Transactions: blockchain.Transactions,
 	}
 	blockchain.Chain = append(blockchain.Chain, newBlock)
-	blockchain.Transactions = []*pb.Transaction{}
+	blockchain.Transactions = []*transactions.Transaction{}
 	return newBlock
 }
 
-func GetPreviousBlock(blockchain *pb.Blockchain) *pb.Block {
+func GetPreviousBlock(blockchain *Blockchain) *Block {
 	return blockchain.Chain[len(blockchain.Chain)-1]
 }
 
@@ -64,7 +75,7 @@ func ProofOfWork(previousProof int64) int64 {
 	return newProof
 }
 
-func HashBlock(Block *pb.Block) []byte {
+func HashBlock(Block *Block) []byte {
 	encodedBlock := sha256.Sum256([]byte(fmt.Sprintf("%v", Block)))
 	return []byte(hex.EncodeToString(encodedBlock[:]))
 }
@@ -77,7 +88,7 @@ func HashProof(newProof int64, prevProof int64) string {
 	return hex.EncodeToString(hashBytes[:])
 }
 
-func IsChainValid(chain []*pb.Block) bool {
+func IsChainValid(chain []*Block) bool {
 	for i, block := range chain {
 		if i > 0 {
 			prevBlock := chain[i-1]
@@ -88,7 +99,7 @@ func IsChainValid(chain []*pb.Block) bool {
 
 			// False if the proof does not start with 0000
 			proofHash := HashProof(block.Proof, prevBlock.Proof)
-			if proofHash[:4] != "0000" {
+			if proofHash[:4] != "00000" {
 				return false
 			}
 		}
@@ -96,29 +107,25 @@ func IsChainValid(chain []*pb.Block) bool {
 	return true
 }
 
-func AddTransaction(blockchain *pb.Blockchain, sender string, recipient string, amount float32) {
-	newTx := &pb.Transaction{
+func AddTransaction(blockchain *Blockchain, sender string, recipient string, amount float64) {
+	newTx := &transactions.Transaction{
 		Sender:    sender,
 		Recipient: recipient,
 		Amount:    amount,
 	}
 	blockchain.Transactions = append(blockchain.Transactions, newTx)
-	print("Transaction successfully added!")
+	fmt.Println("Transaction successfully added!")
 }
 
-func AddNode(blockchain *pb.Blockchain, address string) {
-	blockchain.Nodes = append(blockchain.Nodes, address)
-	print("Node successfully added!")
-}
-
-func ReplaceChain(blockchain *pb.Blockchain) error {
-	var longestChain []*pb.Block
+func ReplaceChain(blockchain *Blockchain) (bool, error) {
+	chainReplaced := false
+	var longestChain []*Block
 	maxlength := len(blockchain.Chain)
 	for _, node := range blockchain.Nodes {
 		nodeChain, err := GetChainFromNode(node)
 
 		if err != nil {
-			return err
+			return chainReplaced, err
 		}
 		// Access the received blockchain's chain
 		if len(nodeChain) > maxlength && IsChainValid(nodeChain) {
@@ -128,12 +135,13 @@ func ReplaceChain(blockchain *pb.Blockchain) error {
 	}
 	if longestChain != nil {
 		blockchain.Chain = longestChain
+		chainReplaced = true
 	}
 
-	return nil
+	return chainReplaced, nil
 }
 
-func GetChainFromNode(node string) ([]*pb.Block, error) {
+func GetChainFromNode(node string) ([]*Block, error) {
 	url := fmt.Sprintf("http://%s/getChain", node)
 	response, err := http.Get(url)
 	if err != nil {
@@ -143,22 +151,23 @@ func GetChainFromNode(node string) ([]*pb.Block, error) {
 	defer response.Body.Close()
 
 	// Read the response body
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		fmt.Println("Error reading response body:", err)
-		return nil, err
-	}
+	// body, err := io.ReadAll(response.Body)
+	// if err != nil {
+	// 	fmt.Println("Error reading response body:", err)
+	// 	return nil, err
+	// }
 	// Decode the protobuf-encoded data
-	var chainBuf pb.Chain
-	err = proto.Unmarshal(body, &chainBuf)
-	if err != nil {
-		fmt.Println("Error decoding protobuf data:", err)
-		return nil, err
-	}
+	var chainBuf []*Block
+	// err = proto.Unmarshal(body, &chainBuf)
+	// if err != nil {
+	// 	fmt.Println("Error decoding protobuf data:", err)
+	// 	return nil, err
+	// }
 
-	receivedChain := chainBuf.Chain
+	// receivedChain := chainBuf
 
-	return receivedChain, nil
+	// return receivedChain, nil
+	return chainBuf, nil
 }
 
 // Improvements:

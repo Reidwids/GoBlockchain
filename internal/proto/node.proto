@@ -1,0 +1,13 @@
+syntax = "proto3";
+package pb;
+option go_package = "./pb";
+
+message NodeList {
+      repeated string Nodes = 1;
+}
+
+message GetNodesReq {}
+
+service NodeService {
+  rpc GetNodes(GetNodesReq) returns (NodeList) {};
+}
