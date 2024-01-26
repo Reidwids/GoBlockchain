@@ -5,6 +5,9 @@ import (
 	"GoBlockchain/internal/proto/pb"
 	"context"
 	"fmt"
+	"log"
+
+	"google.golang.org/grpc"
 )
 
 type Server struct {
@@ -12,8 +15,28 @@ type Server struct {
 	Blockchain *blockchain.Blockchain
 }
 
-func (s *Server) GetNodes(ctx context.Context, req *pb.GetNodesReq) (*pb.NodeList, error) {
+func (s *Server) GetNodesRes(ctx context.Context, req *pb.GetNodesReq) (*pb.NodeList, error) {
 	return &pb.NodeList{Nodes: s.Blockchain.Nodes}, nil
+}
+
+func AddNode(blockchain *blockchain.Blockchain, address string) {
+	blockchain.Nodes = append(blockchain.Nodes, address)
+	fmt.Println("Node successfully added!")
+}
+
+func GetNodesReq() {
+	conn, err := grpc.Dial("localhost:3004", grpc.WithInsecure())
+	if err != nil {
+		log.Fatalf("Failed to dial gRPC server: %v", err)
+	}
+	defer conn.Close()
+
+	client := pb.NewNodeServiceClient(conn)
+	res, err := client.GetNodes(context.Background(), &pb.GetNodesReq{})
+	if err != nil {
+		log.Fatalf("Failed to get nodes: %v", err)
+	}
+	fmt.Println(res.Nodes)
 }
 
 // broadcast block
@@ -26,11 +49,6 @@ func (s *Server) GetNodes(ctx context.Context, req *pb.GetNodesReq) (*pb.NodeLis
 
 // Func to query hardcoded nodes for their nodelist
 // Func to add new node to nodelist
-
-func AddNode(blockchain *blockchain.Blockchain, address string) {
-	blockchain.Nodes = append(blockchain.Nodes, address)
-	fmt.Println("Node successfully added!")
-}
 
 // func validateNodes() bool {}
 
