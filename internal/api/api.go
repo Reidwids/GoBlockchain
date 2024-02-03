@@ -19,46 +19,50 @@ import (
 type ContextKey string
 
 const (
-	blockchainKey  ContextKey = "blockchain"
-	nodeAddressKey ContextKey = "nodeAddress"
+	blockchainKey ContextKey = "blockchain"
+	nodeKey       ContextKey = "nodeKey"
 )
 
 func Start() {
 	fmt.Println("Starting Go Blockchain...")
 	bc := blockchain.NewBlockchain()
-	nodeId := uuid.New()
+	n := &node.Node{
+		ID:      uuid.New().String(),
+		Address: "localhost:3003",
+		Peers:   []string{},
+	}
 
 	// Use a wait group to launch both servers
 	var waitGroup sync.WaitGroup
 	waitGroup.Add(2)
 
 	go func() {
-		startgRPC(bc, nodeId)
+		startgRPC(bc, n)
 		waitGroup.Done()
 	}()
 
 	go func() {
-		starthttp(bc, nodeId)
+		starthttp(bc, n)
 		waitGroup.Done()
 	}()
 
 	waitGroup.Wait()
 }
 
-func starthttp(bc *blockchain.Blockchain, nodeId uuid.UUID) {
+func starthttp(bc *blockchain.Blockchain, n *node.Node) {
 	http.HandleFunc("/", handleRoot)
-	http.HandleFunc("/mineBlock", withBlockchain(handleMineBlock, bc, nodeId))
-	http.HandleFunc("/getChain", withBlockchain(handleGetChain, bc, nodeId))
-	http.HandleFunc("/isChainValid", withBlockchain(handleIsChainValid, bc, nodeId))
-	http.HandleFunc("/addTransaction", withBlockchain(handleAddTransaction, bc, nodeId))
-	http.HandleFunc("/connectNode", withBlockchain(handleConnectNode, bc, nodeId))
-	http.HandleFunc("/replaceChain", withBlockchain(handleReplaceChain, bc, nodeId))
+	http.HandleFunc("/mineBlock", withContext(handleMineBlock, bc, n))
+	http.HandleFunc("/getChain", withContext(handleGetChain, bc, n))
+	http.HandleFunc("/isChainValid", withContext(handleIsChainValid, bc, n))
+	http.HandleFunc("/addTransaction", withContext(handleAddTransaction, bc, n))
+	http.HandleFunc("/connectNode", withContext(handleConnectNode, bc, n))
+	// http.HandleFunc("/replaceChain", withBlockchain(handleReplaceChain, bc, n))
 	fmt.Println("Go Blockchain http running on port 3003...")
-	http.ListenAndServe(":3003", nil)
+	http.ListenAndServe(":3000", nil)
 }
 
-func startgRPC(bc *blockchain.Blockchain, nodeId uuid.UUID) {
-	lis, err := net.Listen("tcp", ":3005")
+func startgRPC(bc *blockchain.Blockchain, n *node.Node) {
+	lis, err := net.Listen("tcp", ":3001")
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
@@ -76,28 +80,13 @@ func startgRPC(bc *blockchain.Blockchain, nodeId uuid.UUID) {
 	}
 }
 
-func withBlockchain(next http.HandlerFunc, bc *blockchain.Blockchain, nodeId uuid.UUID) http.HandlerFunc {
+func withContext(next http.HandlerFunc, bc *blockchain.Blockchain, n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Add 'bc' to the request context
 		ctx := context.WithValue(r.Context(), blockchainKey, bc)
-		ctx = context.WithValue(ctx, nodeAddressKey, nodeId)
+		ctx = context.WithValue(ctx, nodeKey, n)
 		next(w, r.WithContext(ctx))
 	}
-}
-
-func testgRPC() {
-	conn, err := grpc.Dial("localhost:3004", grpc.WithInsecure())
-	if err != nil {
-		log.Fatalf("Failed to dial gRPC server: %v", err)
-	}
-	defer conn.Close()
-
-	client := pb.NewNodeServiceClient(conn)
-	res, err := client.GetNodes(context.Background(), &pb.GetNodesReq{})
-	if err != nil {
-		log.Fatalf("Failed to get nodes: %v", err)
-	}
-	fmt.Println(res.Nodes)
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -114,34 +103,29 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func handleMineBlock(w http.ResponseWriter, r *http.Request) {
 	bc := r.Context().Value(blockchainKey).(*blockchain.Blockchain)
-	nodeId := r.Context().Value(nodeAddressKey).(uuid.UUID)
+	n := r.Context().Value(nodeKey).(*node.Node)
 
-	prevBlock := blockchain.GetPreviousBlock(bc)
-	prevProof := prevBlock.Proof
-	previousHash := blockchain.HashBlock(prevBlock)
-	newProof := blockchain.ProofOfWork(prevProof)
-	blockchain.AddTransaction(bc, "The Network", nodeId.String(), 1)
-	block := blockchain.CreateBlock(bc, newProof, previousHash)
+	block := blockchain.MineBlock(bc, n.ID)
 	response := struct {
 		Message   string `json:"message"`
 		Index     int64  `json:"index"`
 		Timestamp int64  `json:"timestamp"`
-		PrevHash  []byte `json:"prevHash"`
+		PrevHash  string `json:"prevHash"`
 	}{
 		Message:   "Block mined",
 		Index:     block.Index,
 		Timestamp: block.Timestamp,
-		PrevHash:  block.PrevHash,
+		PrevHash:  string(block.PrevHash),
 	}
 	json.NewEncoder(w).Encode(response)
 }
 
 func handleGetChain(w http.ResponseWriter, r *http.Request) {
-	// bc := r.Context().Value(blockchainKey).(*blockchain.Blockchain)
+	bc := r.Context().Value(blockchainKey).(*blockchain.Blockchain)
 	response := struct {
-		Chain []*pb.Block `json:"chain"`
+		Chain []*blockchain.Block `json:"chain"`
 	}{
-		// Chain: blockchain.Blockchain.Chain,
+		Chain: bc.Chain,
 	}
 	json.NewEncoder(w).Encode(response)
 }
@@ -149,27 +133,25 @@ func handleGetChain(w http.ResponseWriter, r *http.Request) {
 func handleIsChainValid(w http.ResponseWriter, r *http.Request) {
 	bc := r.Context().Value(blockchainKey).(*blockchain.Blockchain)
 	isValid := blockchain.IsChainValid(bc.Chain)
-	if isValid {
-		response := struct {
-			IsValid     bool `json:"isValid"`
-			ChainLength int  `json:"chainLength"`
-		}{
-			IsValid:     isValid,
-			ChainLength: len(bc.Chain),
-		}
-		json.NewEncoder(w).Encode(response)
+	response := struct {
+		IsValid     bool `json:"isValid"`
+		ChainLength int  `json:"chainLength"`
+	}{
+		IsValid:     isValid,
+		ChainLength: len(bc.Chain),
 	}
+	json.NewEncoder(w).Encode(response)
 }
 
 func handleAddTransaction(w http.ResponseWriter, r *http.Request) {
-	// bc := r.Context().Value(blockchainKey).(*blockchain.Blockchain)
+	bc := r.Context().Value(blockchainKey).(*blockchain.Blockchain)
 	var tx pb.Transaction
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&tx); err != nil {
 		http.Error(w, "Invalid JSON data", http.StatusBadRequest)
 		return
 	}
-	// blockchain.AddTransaction(bc, tx.Sender, tx.Recipient, tx.Amount)
+	blockchain.AddTransaction(bc, tx.Sender, tx.Recipient, tx.Amount)
 
 	response := struct {
 		Message string `json:"message"`
@@ -180,7 +162,7 @@ func handleAddTransaction(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleConnectNode(w http.ResponseWriter, r *http.Request) {
-	bc := r.Context().Value(blockchainKey).(*blockchain.Blockchain)
+	// bc := r.Context().Value(blockchainKey).(*blockchain.Blockchain)
 	type ConnectNodeRq struct {
 		NodeAddress string `json:"nodeAddress"`
 	}
@@ -191,7 +173,7 @@ func handleConnectNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Get requesting node's IP address
-	node.AddNode(bc, body.NodeAddress)
+	// node.AddNode(bc, body.NodeAddress)
 
 	response := struct {
 		Message string `json:"message"`
@@ -201,35 +183,35 @@ func handleConnectNode(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func handleReplaceChain(w http.ResponseWriter, r *http.Request) {
-	bc := r.Context().Value(blockchainKey).(*blockchain.Blockchain)
+// func handleReplaceChain(w http.ResponseWriter, r *http.Request) {
+// 	bc := r.Context().Value(blockchainKey).(*blockchain.Blockchain)
 
-	chainReplaced, err := blockchain.ReplaceChain(bc)
-	if err != nil {
-		http.Error(w, "Error replacing chain", http.StatusBadRequest)
-		return
-	}
+// 	chainReplaced, err := blockchain.ReplaceChain(bc)
+// 	if err != nil {
+// 		http.Error(w, "Error replacing chain", http.StatusBadRequest)
+// 		return
+// 	}
 
-	response := struct {
-		Message string `json:"message"`
-	}{
-		Message: func() string {
-			if chainReplaced {
-				return "Chain was replaced"
-			}
-			return "Chain was not replaced"
-		}(),
-	}
-	json.NewEncoder(w).Encode(response)
-}
+// 	response := struct {
+// 		Message string `json:"message"`
+// 	}{
+// 		Message: func() string {
+// 			if chainReplaced {
+// 				return "Chain was replaced"
+// 			}
+// 			return "Chain was not replaced"
+// 		}(),
+// 	}
+// 	json.NewEncoder(w).Encode(response)
+// }
 
 func getNodes(w http.ResponseWriter, r *http.Request) {
-	bc := r.Context().Value(blockchainKey).(*blockchain.Blockchain)
+	n := r.Context().Value(nodeKey).(*node.Node)
 
 	response := struct {
 		Nodes []string `json:"nodes"`
 	}{
-		Nodes: bc.Nodes,
+		Nodes: n.Peers,
 	}
 	json.NewEncoder(w).Encode(response)
 }

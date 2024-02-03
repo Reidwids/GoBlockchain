@@ -15,14 +15,20 @@ type Server struct {
 	Blockchain *blockchain.Blockchain
 }
 
-func (s *Server) GetNodesRes(ctx context.Context, req *pb.GetNodesReq) (*pb.NodeList, error) {
-	return &pb.NodeList{Nodes: s.Blockchain.Nodes}, nil
+type Node struct {
+	ID      string
+	Address string
+	Peers   []string
 }
 
-func AddNode(blockchain *blockchain.Blockchain, address string) {
-	blockchain.Nodes = append(blockchain.Nodes, address)
-	fmt.Println("Node successfully added!")
-}
+// func (s *Server) GetNodesRes(ctx context.Context, req *pb.GetNodesReq) (*pb.NodeList, error) {
+// 	return &pb.NodeList{Nodes: s.Blockchain.Nodes}, nil
+// }
+
+// func AddNode(blockchain *blockchain.Blockchain, address string) {
+// 	blockchain.Nodes = append(blockchain.Nodes, address)
+// 	fmt.Println("Node successfully added!")
+// }
 
 func GetNodesReq() {
 	conn, err := grpc.Dial("localhost:3004", grpc.WithInsecure())

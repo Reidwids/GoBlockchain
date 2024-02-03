@@ -5,8 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"net/http"
+	"strings"
+	"sync"
 	"time"
 
 	"GoBlockchain/internal/transactions"
@@ -15,77 +16,54 @@ import (
 type Blockchain struct {
 	Chain        []*Block
 	Transactions []*transactions.Transaction
-	Nodes        []string
+	mutex        sync.Mutex
 }
 
 type Block struct {
 	Index        int64
 	Timestamp    int64
 	Proof        int64
+	Hash         []byte
 	PrevHash     []byte
 	Transactions []*transactions.Transaction
+	Difficulty   int
+	Nonce        string
 }
 
 func NewBlockchain() *Blockchain {
 	genesisBlock := &Block{
 		Index:        0,
 		Timestamp:    time.Now().Unix(),
-		Proof:        0,
 		PrevHash:     []byte{},
 		Transactions: []*transactions.Transaction{},
+		Difficulty:   4,
+		Nonce:        "",
 	}
+
+	minedBlock := ProofOfWork(genesisBlock)
 
 	return &Blockchain{
-		Chain:        []*Block{genesisBlock},
+		Chain:        []*Block{minedBlock},
 		Transactions: []*transactions.Transaction{},
-		Nodes:        []string{"localhost:3001", "localhost:3002"},
 	}
 }
 
-func CreateBlock(blockchain *Blockchain, proof int64, previousHash []byte) *Block {
-	newBlock := &Block{
-		Index:        int64(len(blockchain.Chain)),
-		Timestamp:    time.Now().Unix(),
-		Proof:        proof,
-		PrevHash:     previousHash,
-		Transactions: blockchain.Transactions,
-	}
-	blockchain.Chain = append(blockchain.Chain, newBlock)
-	blockchain.Transactions = []*transactions.Transaction{}
-	return newBlock
-}
+func HashBlock(block *Block) []byte {
+	record := fmt.Sprintf("%d%d%x%v%d%s",
+		block.Index,
+		block.Timestamp,
+		block.PrevHash,
+		block.Transactions,
+		block.Difficulty,
+		block.Nonce)
 
-func GetPreviousBlock(blockchain *Blockchain) *Block {
-	return blockchain.Chain[len(blockchain.Chain)-1]
-}
-
-func ProofOfWork(previousProof int64) int64 {
-	newProof := int64(1)
-	checkProof := false
-
-	for !checkProof {
-		proofHash := HashProof(newProof, previousProof)
-
-		if proofHash[:4] == "0000" {
-			checkProof = true
-		} else {
-			newProof++
-		}
-	}
-	return newProof
-}
-
-func HashBlock(Block *Block) []byte {
-	encodedBlock := sha256.Sum256([]byte(fmt.Sprintf("%v", Block)))
+	encodedBlock := sha256.Sum256([]byte(fmt.Sprintf("%v", record)))
 	return []byte(hex.EncodeToString(encodedBlock[:]))
 }
 
-func HashProof(newProof int64, prevProof int64) string {
-	// Take the hash of the difference of squares between the 2 proof vals
-	// To create a simple proof of work algorithm
-	hashInput := math.Pow(float64(newProof), 2) - math.Pow(float64(prevProof), 2)
-	hashBytes := sha256.Sum256([]byte(fmt.Sprintf("%f", hashInput)))
-	return hex.EncodeToString(hashBytes[:])
+func isHashValid(hash []byte, difficulty int) bool {
+	prefix := strings.Repeat("0", difficulty)
+	return strings.HasPrefix(string(hash), prefix)
 }
 
 func IsChainValid(chain []*Block) bool {
@@ -97,9 +75,9 @@ func IsChainValid(chain []*Block) bool {
 				return false
 			}
 
-			// False if the proof does not start with 0000
-			proofHash := HashProof(block.Proof, prevBlock.Proof)
-			if proofHash[:4] != "00000" {
+			// False if the proof does not start with difficulty number of 0s
+			proofHash := HashBlock(prevBlock)
+			if !isHashValid(proofHash, prevBlock.Difficulty) {
 				return false
 			}
 		}
@@ -107,39 +85,88 @@ func IsChainValid(chain []*Block) bool {
 	return true
 }
 
-func AddTransaction(blockchain *Blockchain, sender string, recipient string, amount float64) {
+func ProofOfWork(newBlock *Block) *Block {
+	for i := 0; ; i++ {
+		hex := fmt.Sprintf("%x", i)
+		newBlock.Nonce = hex
+
+		hash := HashBlock(newBlock)
+		if isHashValid(hash, newBlock.Difficulty) {
+			fmt.Println(string(hash), " work done!")
+			newBlock.Hash = hash
+			break
+		}
+	}
+	return newBlock
+}
+
+func MineBlock(bc *Blockchain, nodeID string) *Block {
+	prevBlock := bc.Chain[len(bc.Chain)-1]
+
+	AddTransaction(bc, "The Network", nodeID, 1)
+	newBlock := &Block{
+		Index:        int64(len(bc.Chain)),
+		Timestamp:    time.Now().Unix(),
+		PrevHash:     prevBlock.Hash,
+		Difficulty:   prevBlock.Difficulty,
+		Transactions: bc.Transactions,
+		Nonce:        "",
+	}
+	minedBlock := ProofOfWork(newBlock)
+
+	bc.mutex.Lock()
+	bc.Chain = append(bc.Chain, minedBlock)
+	bc.Transactions = []*transactions.Transaction{}
+	bc.mutex.Unlock()
+	return newBlock
+}
+
+func AddTransaction(bc *Blockchain, sender string, recipient string, amount float32) {
 	newTx := &transactions.Transaction{
 		Sender:    sender,
 		Recipient: recipient,
 		Amount:    amount,
 	}
-	blockchain.Transactions = append(blockchain.Transactions, newTx)
-	fmt.Println("Transaction successfully added!")
+	bc.mutex.Lock()
+	bc.Transactions = append(bc.Transactions, newTx)
+	bc.mutex.Unlock()
+	fmt.Println("New Transaction: ", newTx)
 }
 
-func ReplaceChain(blockchain *Blockchain) (bool, error) {
-	chainReplaced := false
-	var longestChain []*Block
-	maxlength := len(blockchain.Chain)
-	for _, node := range blockchain.Nodes {
-		nodeChain, err := GetChainFromNode(node)
+// func IsBlockValid(block *Block, prevBlock *Block) bool {
+// 	// False if the previous block hash does not equal the current block hash
+// 	if !bytes.Equal(block.PrevHash, HashBlock(prevBlock)) {
+// 		return false
+// 	}
 
-		if err != nil {
-			return chainReplaced, err
-		}
-		// Access the received blockchain's chain
-		if len(nodeChain) > maxlength && IsChainValid(nodeChain) {
-			maxlength = len(nodeChain)
-			longestChain = nodeChain
-		}
-	}
-	if longestChain != nil {
-		blockchain.Chain = longestChain
-		chainReplaced = true
-	}
+// 	// False if the proof does not start with 0000
+// 	proofHash := HashBlock(block)
+// 	return isHashValid(proofHash, block.Difficulty)
+// }
 
-	return chainReplaced, nil
-}
+// func ReplaceChain(blockchain *Blockchain) (bool, error) {
+// 	chainReplaced := false
+// 	var longestChain []*Block
+// 	maxlength := len(blockchain.Chain)
+// 	for _, node := range node.Nodes {
+// 		nodeChain, err := GetChainFromNode(node)
+
+// 		if err != nil {
+// 			return chainReplaced, err
+// 		}
+// 		// Access the received blockchain's chain
+// 		if len(nodeChain) > maxlength && IsChainValid(nodeChain) {
+// 			maxlength = len(nodeChain)
+// 			longestChain = nodeChain
+// 		}
+// 	}
+// 	if longestChain != nil {
+// 		blockchain.Chain = longestChain
+// 		chainReplaced = true
+// 	}
+
+// 	return chainReplaced, nil
+// }
 
 func GetChainFromNode(node string) ([]*Block, error) {
 	url := fmt.Sprintf("http://%s/getChain", node)
