@@ -2,19 +2,85 @@ package main
 
 import (
 	"GoBlockchain/internal/blockchain"
+	"flag"
 	"fmt"
+	"os"
+	"runtime"
 	"strconv"
 )
 
-func main() {
-	// Define command-line flags
-	// api.Start()
-	chain := blockchain.InitBlockChain()
-	chain.AddBlock("First Block")
-	chain.AddBlock("Second Block")
-	chain.AddBlock("Third Block")
+type CommandLine struct {
+	blockchain *blockchain.BlockChain
+}
 
-	for _, block := range chain.Blocks {
+func main() {
+	// VERY important to shutdown the app properly. Badger db must be properly
+	// Garbage collected before terminating or else the data could corrupt!
+	defer os.Exit(0)
+	chain := blockchain.InitBlockChain()
+	defer chain.Database.Close()
+
+	cli := CommandLine{chain}
+	cli.run()
+}
+
+func (cli *CommandLine) run() {
+	cli.validateArgs()
+
+	addBlockCmd := flag.NewFlagSet("add", flag.ExitOnError)
+	addBlockData := addBlockCmd.String("block", "", "Block data")
+
+	printChainCmd := flag.NewFlagSet("print", flag.ExitOnError)
+
+	switch os.Args[1] {
+	case "add":
+		err := addBlockCmd.Parse(os.Args[2:])
+		blockchain.Handle(err)
+	case "print":
+		err := printChainCmd.Parse(os.Args[2:])
+		blockchain.Handle(err)
+	default:
+		cli.printUsage()
+		runtime.Goexit()
+	}
+
+	if addBlockCmd.Parsed() {
+		if *addBlockData == "" {
+			addBlockCmd.Usage()
+			runtime.Goexit()
+		}
+		cli.addBlock(*addBlockData)
+	}
+	if printChainCmd.Parsed() {
+		cli.printChain()
+	}
+
+}
+
+func (cli *CommandLine) printUsage() {
+	fmt.Println("Usage:")
+	fmt.Println(" -block BLOCK_DATA - to add a block to the chain")
+	fmt.Println(" -print - Prints the blocks in the chain")
+}
+
+func (cli *CommandLine) validateArgs() {
+	if len(os.Args) < 2 {
+		cli.printUsage()
+
+		runtime.Goexit()
+	}
+}
+
+func (cli *CommandLine) addBlock(data string) {
+	cli.blockchain.AddBlock(data)
+	fmt.Println("Added Block!")
+}
+
+func (cli *CommandLine) printChain() {
+	iter := cli.blockchain.Iterator()
+
+	for {
+		block := iter.Next()
 		fmt.Printf("Previous Hash: %x\n", block.PrevHash)
 		fmt.Printf("Data in Block: %s\n", block.Data)
 		fmt.Printf("Hash: %x\n", block.Hash)
@@ -22,36 +88,9 @@ func main() {
 		pow := blockchain.NewProof(block)
 		fmt.Printf("PoW: %s\n", strconv.FormatBool((pow.Validate())))
 		fmt.Println()
+
+		if len(block.PrevHash) == 0 {
+			break
+		}
 	}
-
-	// createBlockchain := flag.Bool("create", false, "Create a new blockchain")
-	// addBlock := flag.String("addblock", "", "Add a new block to the blockchain")
-	// listBlocks := flag.Bool("list", false, "List all blocks in the blockchain")
-	// startApi := flag.Bool("api", false, "Start the API server")
-	// flag.Parse()
-	// Process command-line flags
-	// if *createBlockchain {
-	// 	// Create a new blockchain
-	// 	fmt.Println("Creating a new blockchain...")
-	// } else if *addBlock != "" {
-	// 	// Add a new block to the blockchain
-	// 	fmt.Println("Adding a new block to the blockchain...")
-	// 	// bc.AddBlock(*addBlock)
-	// } else if *listBlocks {
-	// 	// List all blocks in the blockchain
-	// 	fmt.Println("Listing all blocks in the blockchain:")
-	// 	// for _, block := range bc.Blocks {
-	// 	// 	fmt.Printf("Block %d: %s\n", block.Index, block.Data)
-	// 	// }
-	// } else if *startApi {
-	// 	// Start the API server
-	// 	fmt.Println("Starting the API server...")
-	// 	api.Start()
-
-	// } else {
-	// 	// No valid command-line flags provided
-	// 	fmt.Println("Usage:")
-	// 	flag.PrintDefaults()
-	// 	os.Exit(1)
-	// }
 }
