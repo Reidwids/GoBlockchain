@@ -15,17 +15,6 @@ type Transaction struct {
 	Outputs []TxOutput
 }
 
-type TxOutput struct {
-	Value  int    // value of output tokens in the tx. outputs cannot be split
-	PubKey string // the key needed to unlock the tokens
-}
-
-type TxInput struct {
-	ID  []byte // references the transaction ID the output is inside of
-	Out int    // the index the output appears
-	Sig string // provides the data used in the outputs pub key
-}
-
 // In our genesis block, we must make a coinbase - a first transaction
 
 func CoinbaseTx(to, data string) *Transaction {
@@ -58,14 +47,6 @@ func (tx *Transaction) SetID() {
 
 func (tx *Transaction) IsCoinbase() bool {
 	return len(tx.Inputs) == 1 && len(tx.Inputs[0].ID) == 0 && tx.Inputs[0].Out == -1
-}
-
-func (in *TxInput) CanUnlock(data string) bool {
-	return in.Sig == data
-}
-
-func (out *TxOutput) CanBeUnlocked(data string) bool {
-	return out.PubKey == data
 }
 
 func NewTransaction(from, to string, amount int, chain *BlockChain) *Transaction {
