@@ -1,20 +1,64 @@
 package blockchain
 
+import (
+	"GoBlockchain/internal/utils"
+	"GoBlockchain/internal/wallet"
+	"bytes"
+	"fmt"
+	"strings"
+)
+
 type TxOutput struct {
-	Value  int    // value of output tokens in the tx. outputs cannot be split
-	PubKey string // the key needed to unlock the tokens
+	Value      int    // value of output tokens in the tx. outputs cannot be split
+	PubKeyHash []byte // the key needed to unlock the tokens
 }
 
 type TxInput struct {
-	ID  []byte // references the transaction ID the output is inside of
-	Out int    // the index the output appears
-	Sig string // provides the data used in the outputs pub key
+	ID        []byte // references the transaction ID the output is inside of
+	Out       int    // the index the output appears
+	Signature []byte // provides the data used in the outputs pub key
+	PubKey    []byte
 }
 
-func (in *TxInput) CanUnlock(data string) bool {
-	return in.Sig == data
+func NewTxOutput(value int, address string) *TxOutput {
+	txo := &TxOutput{value, nil}
+	txo.Lock([]byte(address))
+	return txo
 }
 
-func (out *TxOutput) CanBeUnlocked(data string) bool {
-	return out.PubKey == data
+func (in *TxInput) UsesKey(pubKeyHash []byte) bool {
+	lockingHash := wallet.PublicKeyHash(in.PubKey)
+
+	return bytes.Compare(lockingHash, pubKeyHash) == 0
+}
+
+func (out *TxOutput) Lock(address []byte) {
+	pubKeyHash := utils.Base58Decode(address)
+	pubKeyHash = pubKeyHash[1 : len(pubKeyHash)-4]
+	out.PubKeyHash = pubKeyHash
+}
+
+func (out *TxOutput) IsLockedWithKey(pubKeyHash []byte) bool {
+	return bytes.Compare(out.PubKeyHash, pubKeyHash) == 0
+}
+
+func (tx *Transaction) ToString() string {
+	var lines []string
+
+	lines = append(lines, fmt.Sprintf("--- Transaction %x:", tx.ID))
+	for i, input := range tx.Inputs {
+		lines = append(lines, fmt.Sprintf("Input %d:", i))
+		lines = append(lines, fmt.Sprintf("  TXID: %x", input.ID))
+		lines = append(lines, fmt.Sprintf("  Out: %d", input.Out))
+		lines = append(lines, fmt.Sprintf("  Signature: %x", input.Signature))
+		lines = append(lines, fmt.Sprintf("  PubKey: %x", input.PubKey))
+	}
+
+	for i, output := range tx.Outputs {
+		lines = append(lines, fmt.Sprintf("Output %d:", i))
+		lines = append(lines, fmt.Sprintf("  Value: %d", output.Value))
+		lines = append(lines, fmt.Sprintf("  PubKeyHash: %x", output.PubKeyHash))
+	}
+
+	return strings.Join(lines, "\n")
 }
