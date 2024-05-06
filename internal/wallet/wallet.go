@@ -2,11 +2,11 @@ package wallet
 
 import (
 	"GoBlockchain/internal/utils"
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
-	"fmt"
 	"log"
 	"math/big"
 )
@@ -88,9 +88,15 @@ func (w Wallet) Address() []byte {
 	fullHash := append(versionedHash, checksum...)
 	address := utils.Base58Encode(fullHash)
 
-	fmt.Printf("Public key: %x\n", w.PublicKey)
-	fmt.Printf("Public key hash: %x\n", pubHash)
-	fmt.Printf("Address: %s\n", address)
-
 	return address
+}
+
+func ValidateAddress(address string) bool {
+	pubKeyHash := utils.Base58Decode([]byte(address))
+	actualChecksum := pubKeyHash[len(pubKeyHash)-checksumLength:]
+	version := pubKeyHash[0]
+	pubKeyHash = pubKeyHash[1 : len(pubKeyHash)-checksumLength]
+	targetChecksum := Checksum(append([]byte{version}, pubKeyHash...))
+
+	return bytes.Equal(actualChecksum, targetChecksum)
 }

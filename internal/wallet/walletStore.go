@@ -54,7 +54,7 @@ func (ws *Wallets) LoadFile() error {
 	return nil
 }
 
-func CreateWallets() (*Wallets, error) {
+func CreateWalletsMap() (*Wallets, error) {
 	wallets := Wallets{}
 	wallets.Wallets = make(map[string]*Wallet)
 
