@@ -183,10 +183,15 @@ func (cli *CommandLine) send(from, to string, amount int) {
 
 	chain := blockchain.ContinueBlockChain(from)
 	UTXOSet := blockchain.UTXOSet{Blockchain: chain}
+	UTXOSet.Reindex()
 	defer chain.Database.Close()
 
 	tx := blockchain.NewTransaction(from, to, amount, &UTXOSet)
-	block := chain.AddBlock([]*blockchain.Transaction{tx})
+
+	// Give reward for mining block
+	cbTx := blockchain.CoinbaseTx(from, "")
+
+	block := chain.AddBlock([]*blockchain.Transaction{cbTx, tx})
 	UTXOSet.Update(block)
 	fmt.Println("Send was successful!")
 }

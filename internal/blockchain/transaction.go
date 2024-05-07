@@ -136,13 +136,16 @@ func (tx *Transaction) Verify(prevTxs map[string]Transaction) bool {
 
 func CoinbaseTx(to, data string) *Transaction {
 	if data == "" {
-		data = fmt.Sprintf("Coins to %s", to)
+		randData := make([]byte, 24)
+		_, err := rand.Read(randData)
+		Handle(err)
+		data = fmt.Sprintf("%x", randData)
 	}
 
 	// The coinbase references no input or output, and the sig is the arbitrary data string
 	txin := TxInput{[]byte{}, -1, nil, []byte(data)}
 	// We declare the out as the reward for mining the block, as well as the to address
-	txout := NewTxOutput(100, to)
+	txout := NewTxOutput(20, to)
 
 	tx := Transaction{nil, []TxInput{txin}, []TxOutput{*txout}}
 	tx.ID = tx.Hash()
