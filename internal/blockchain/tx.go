@@ -4,6 +4,7 @@ import (
 	"GoBlockchain/internal/utils"
 	"GoBlockchain/internal/wallet"
 	"bytes"
+	"encoding/gob"
 	"fmt"
 	"strings"
 )
@@ -11,6 +12,10 @@ import (
 type TxOutput struct {
 	Value      int    // value of output tokens in the tx. outputs cannot be split
 	PubKeyHash []byte // the key needed to unlock the tokens
+}
+
+type TxOutputs struct {
+	Outputs []TxOutput
 }
 
 type TxInput struct {
@@ -47,8 +52,8 @@ func (tx *Transaction) ToString() string {
 
 	lines = append(lines, fmt.Sprintf("--- Transaction %x:", tx.ID))
 	for i, input := range tx.Inputs {
-		lines = append(lines, fmt.Sprintf("Input %d:", i))
-		lines = append(lines, fmt.Sprintf("  TXID: %x", input.ID))
+		lines = append(lines, fmt.Sprintf("Input # %d:", i))
+		lines = append(lines, fmt.Sprintf("  Input TxID: %x", input.ID))
 		lines = append(lines, fmt.Sprintf("  Out: %d", input.Out))
 		lines = append(lines, fmt.Sprintf("  Signature: %x", input.Signature))
 		lines = append(lines, fmt.Sprintf("  PubKey: %x", input.PubKey))
@@ -61,4 +66,20 @@ func (tx *Transaction) ToString() string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func (outs TxOutputs) Serialize() []byte {
+	var buffer bytes.Buffer
+	encode := gob.NewEncoder(&buffer)
+	err := encode.Encode(outs)
+	Handle(err)
+	return buffer.Bytes()
+}
+
+func DeserializeOutputs(data []byte) TxOutputs {
+	var outputs TxOutputs
+	decode := gob.NewDecoder(bytes.NewReader(data))
+	err := decode.Decode(&outputs)
+	Handle(err)
+	return outputs
 }
