@@ -4,18 +4,20 @@ import (
 	"bytes"
 	"crypto/elliptic"
 	"encoding/gob"
+	"fmt"
 	"log"
 	"os"
 )
 
-const walletsPath = "./tmp/wallets.data"
+const walletsPath = "./tmp/wallets_%s.data"
 
 type Wallets struct {
 	Wallets map[string]*Wallet
 }
 
-func (ws *Wallets) SaveFile() {
+func (ws *Wallets) SaveFile(nodeId string) {
 	var content bytes.Buffer
+	walletsPath := fmt.Sprintf(walletsPath, nodeId)
 
 	gob.Register(elliptic.P256())
 
@@ -31,7 +33,8 @@ func (ws *Wallets) SaveFile() {
 	}
 }
 
-func (ws *Wallets) LoadFile() error {
+func (ws *Wallets) LoadFile(nodeId string) error {
+	walletsPath := fmt.Sprintf(walletsPath, nodeId)
 	if _, err := os.Stat(walletsPath); os.IsNotExist(err) {
 		return err
 	}
@@ -54,11 +57,11 @@ func (ws *Wallets) LoadFile() error {
 	return nil
 }
 
-func CreateWalletsMap() (*Wallets, error) {
+func CreateWalletsMap(nodeId string) (*Wallets, error) {
 	wallets := Wallets{}
 	wallets.Wallets = make(map[string]*Wallet)
 
-	err := wallets.LoadFile()
+	err := wallets.LoadFile(nodeId)
 
 	return &wallets, err
 }

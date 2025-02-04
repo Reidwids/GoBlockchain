@@ -8,14 +8,15 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/dgraph-io/badger"
 )
 
 const (
-	dbPath      = "./tmp/blocks"
-	dbFile      = "./tmp/blocks/MANIFEST"
+	dbPath      = "./tmp/blocks_%s"
 	genesisData = "First Transaction from Genesis"
 )
 
@@ -29,11 +30,12 @@ type BlockChainIterator struct {
 	Database    *badger.DB
 }
 
-func InitBlockChain(address string) *BlockChain {
+func InitBlockChain(address string, nodeId string) *BlockChain {
+	path := fmt.Sprintf(dbPath, nodeId)
 	// Create a new blockchain
 	var lastHash []byte
 
-	if DBexists() {
+	if DBexists(path) {
 		fmt.Println("Blockchain already exists")
 		runtime.Goexit()
 	}
@@ -43,7 +45,7 @@ func InitBlockChain(address string) *BlockChain {
 	opts.ValueDir = dbPath
 	opts.EventLogging = false
 	opts.Logger = nil
-	db, err := badger.Open(opts)
+	db, err := openDB(path, opts)
 	Handle(err)
 
 	// Our db will hold 2 types of kv pairs - an "lh" / hash pair to store our last hash,
@@ -65,8 +67,9 @@ func InitBlockChain(address string) *BlockChain {
 	return &blockchain
 }
 
-func ContinueBlockChain(address string) *BlockChain {
-	if !DBexists() {
+func ContinueBlockChain(nodeId string) *BlockChain {
+	path := fmt.Sprintf(dbPath, nodeId)
+	if !DBexists(path) {
 		fmt.Println("No existing blockchain found, create one!")
 		runtime.Goexit()
 	}
@@ -77,7 +80,7 @@ func ContinueBlockChain(address string) *BlockChain {
 	opts.ValueDir = dbPath
 	opts.EventLogging = false
 	opts.Logger = nil
-	db, err := badger.Open(opts)
+	db, err := openDB(path, opts)
 	Handle(err)
 
 	err = db.Update(func(txn *badger.Txn) error {
@@ -92,17 +95,24 @@ func ContinueBlockChain(address string) *BlockChain {
 	return &chain
 }
 
-func DBexists() bool {
-	if _, err := os.Stat(dbFile); os.IsNotExist(err) {
+func DBexists(path string) bool {
+	if _, err := os.Stat(path + "/MANIFEST"); os.IsNotExist(err) {
 		return false
 	}
 
 	return true
 }
 
-func (chain *BlockChain) AddBlock(transactions []*Transaction) *Block {
+func (chain *BlockChain) MineBlock(transactions []*Transaction) *Block {
 	// Create a new block with the given data and the previous hash
 	var lastHash []byte
+	var lastHeight int
+
+	for _, tx := range transactions {
+		if !chain.VerifyTransaction(tx) {
+			log.Panic("ERROR: Invalid transaction")
+		}
+	}
 
 	// View is a read only badger db transaction
 	err := chain.Database.View(func(txn *badger.Txn) error {
@@ -110,12 +120,18 @@ func (chain *BlockChain) AddBlock(transactions []*Transaction) *Block {
 		Handle(err)
 		// Get the prev hash from the db
 		lastHash, err = item.ValueCopy(lastHash)
+		Handle(err)
+
+		lastBlockData, _ := item.ValueCopy(nil)
+		lastBlock := Deserialize(lastBlockData)
+		lastHeight = lastBlock.Height
+
 		return err
 	})
 
 	Handle(err)
 
-	newBlock := CreateBlock(transactions, lastHash)
+	newBlock := CreateBlock(transactions, lastHash, lastHeight+1)
 
 	// Update the db with a new kv entry for the new hash + block
 	err = chain.Database.Update(func(txn *badger.Txn) error {
@@ -131,34 +147,99 @@ func (chain *BlockChain) AddBlock(transactions []*Transaction) *Block {
 	return newBlock
 }
 
+func (chain *BlockChain) GetBestHeight() int {
+	var lastBlock Block
+
+	err := chain.Database.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte("lh"))
+		Handle(err)
+		lastHash, _ := item.ValueCopy(nil)
+
+		item, err = txn.Get(lastHash)
+		Handle(err)
+		lastBlockData, _ := item.ValueCopy(nil)
+
+		lastBlock = *Deserialize(lastBlockData)
+
+		return nil
+	})
+	Handle(err)
+
+	return lastBlock.Height
+}
+
+func (chain *BlockChain) GetBlockHashes() [][]byte {
+	var blocks [][]byte
+
+	iter := chain.Iterator()
+
+	for {
+		block := iter.Next()
+
+		blocks = append(blocks, block.Hash)
+
+		if len(block.PrevHash) == 0 {
+			break
+		}
+	}
+
+	return blocks
+}
+
+func (chain *BlockChain) AddBlock(block *Block) {
+	err := chain.Database.Update(func(txn *badger.Txn) error {
+		if _, err := txn.Get(block.Hash); err == nil {
+			return nil
+		}
+
+		err := txn.Set(block.Hash, block.Serialize())
+		Handle(err)
+
+		item, err := txn.Get([]byte("lh"))
+		Handle(err)
+		lastHash, _ := item.ValueCopy(nil)
+
+		item, err = txn.Get(lastHash)
+		Handle(err)
+		lastBlockData, _ := item.ValueCopy(nil)
+		lastBlock := Deserialize(lastBlockData)
+
+		if block.Height > lastBlock.Height {
+			err = txn.Set([]byte("lh"), block.Hash)
+			Handle(err)
+			chain.LastHash = block.Hash
+		}
+
+		return nil
+	})
+	Handle(err)
+}
+
+func (chain *BlockChain) GetBlock(blockHash []byte) (Block, error) {
+	var block Block
+
+	err := chain.Database.View(func(txn *badger.Txn) error {
+		if item, err := txn.Get(blockHash); err != nil {
+			return errors.New("Block is not found")
+		} else {
+			encodedBlock, _ := item.ValueCopy(nil)
+			block = *Deserialize(encodedBlock)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return block, err
+	}
+
+	return block, nil
+
+}
+
 func Handle(err error) {
 	if err != nil {
 		log.Panic(err)
 	}
-}
-
-func (chain *BlockChain) Iterator() *BlockChainIterator {
-	// Create an iterator instance to navigate through the blockchain
-	iter := &BlockChainIterator{chain.LastHash, chain.Database}
-	return iter
-}
-
-func (iter *BlockChainIterator) Next() *Block {
-	var block *Block
-	var encodedBlock []byte
-	// Get the previous block from the db and decode it
-	err := iter.Database.View(func(txn *badger.Txn) error {
-		item, err := txn.Get(iter.CurrentHash)
-		Handle(err)
-		encodedBlock, err = item.ValueCopy(encodedBlock)
-		block = Deserialize(encodedBlock)
-		return err
-	})
-	Handle(err)
-
-	// Set the current hash to current block's prev hash
-	iter.CurrentHash = block.PrevHash
-	return block
 }
 
 // Find UTXO (Unspent transaction output)
@@ -244,4 +325,31 @@ func (bc *BlockChain) VerifyTransaction(tx *Transaction) bool {
 	}
 
 	return tx.Verify(prevTxs)
+}
+
+func retry(dir string, originalOpts badger.Options) (*badger.DB, error) {
+	lockPath := filepath.Join(dir, "LOCK")
+	if err := os.Remove(lockPath); err != nil {
+		return nil, fmt.Errorf("removing lock file: %v", err)
+	}
+	retryOpts := originalOpts
+	retryOpts.Truncate = true
+	db, err := badger.Open(retryOpts)
+	Handle(err)
+	return db, nil
+}
+
+func openDB(dir string, opts badger.Options) (*badger.DB, error) {
+	if db, err := badger.Open(opts); err != nil {
+		if strings.Contains(err.Error(), "LOCK") {
+			if db, err := retry(dir, opts); err == nil {
+				log.Println("database unlocked, value log truncated")
+				return db, nil
+			}
+			log.Println("Could not unlock db:", err)
+		}
+		return nil, err
+	} else {
+		return db, nil
+	}
 }

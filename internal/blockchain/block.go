@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
+	"time"
 )
 
 type Block struct {
@@ -11,11 +12,13 @@ type Block struct {
 	Transactions []*Transaction
 	PrevHash     []byte
 	Nonce        int
+	Height       int
+	Timestamp    int64
 }
 
-func CreateBlock(txs []*Transaction, prevHash []byte) *Block {
+func CreateBlock(txs []*Transaction, prevHash []byte, height int) *Block {
 	// Create an empty block with the prev hash
-	block := &Block{[]byte{}, txs, prevHash, 0}
+	block := &Block{[]byte{}, txs, prevHash, 0, height, time.Now().Unix()}
 
 	// Create a new pow instance from the new block and run the proof
 	pow := NewProof(block)
@@ -31,7 +34,7 @@ func CreateBlock(txs []*Transaction, prevHash []byte) *Block {
 
 func Genesis(coinbase *Transaction) *Block {
 	// Init the chain with the genesis block
-	return CreateBlock([]*Transaction{coinbase}, []byte{})
+	return CreateBlock([]*Transaction{coinbase}, []byte{}, 0)
 }
 
 func (b *Block) Serialize() []byte {
