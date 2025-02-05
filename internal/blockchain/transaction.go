@@ -126,11 +126,10 @@ func (tx *Transaction) Verify(prevTxs map[string]Transaction) bool {
 		y.SetBytes(in.PubKey[(keyLen / 2):])
 
 		rawPubKey := ecdsa.PublicKey{Curve: curve, X: &x, Y: &y}
-		if ecdsa.Verify(&rawPubKey, txCopy.ID, &r, &s) {
+		if !ecdsa.Verify(&rawPubKey, txCopy.ID, &r, &s) {
 			return false
 		}
 	}
-
 	return true
 }
 
