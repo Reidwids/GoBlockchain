@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
+	"io"
+	"log"
 	"time"
 )
 
@@ -52,8 +54,9 @@ func Deserialize(data []byte) *Block {
 	var block Block
 	decoder := gob.NewDecoder(bytes.NewReader(data))
 	err := decoder.Decode(&block)
-
-	Handle(err)
+	if err != nil && err != io.EOF {
+		log.Panic(err)
+	}
 
 	return &block
 }
